@@ -1,0 +1,48 @@
+---
+name: "*use-aws-cli"
+description: "Use the AWS CLI to set up credentials (aws configure, access keys), reset or rotate access keys, and enable IPv6 for EC2 networking. Loads the matching reference for each task."
+---
+
+```yaml
+method:
+  name: "*use-aws-cli"
+  icon: 🛠️
+  category: cli
+  introduce: "Run AWS CLI tasks step by step: first-time aws configure, resetting an access key, and enabling IPv6 on a VPC, subnet and EC2 instance. Each task has a reference with copy-paste commands."
+  usage:
+    method: "*use-aws-cli [task]"
+    parameters:
+      task:
+        description: Natural-language AWS CLI task, such as setting up credentials, resetting an access key, or enabling IPv6.
+        type: string
+        required: false
+    examples:
+      - "*use-aws-cli set up aws configure → load the init reference and walk through getting an Access Key ID"
+      - "*use-aws-cli reset my access key → load the reset reference (quick local reset or full rotation)"
+      - "*use-aws-cli enable ipv6 for my ec2 → load the IPv6 reference and export VPC_ID, SUBNET_ID and friends"
+  agent_compatibility:
+    - "✅ JAMES (Full Stack Developer) - CLI orchestration"
+
+methodology:
+  purpose: >-
+    Translate the user's AWS task into AWS CLI commands, load the matching
+    reference, run the commands step by step, and report the result.
+  expected_output:
+    - The commands that were run, in bash-fenced code blocks
+    - The command output in full, including exit status and any stderr
+    - A plain-language interpretation of the result and the next step
+
+integration_protocols:
+  run:
+    command: "aws <service> <command> --profile <profile>"
+    alias: "aws sts get-caller-identity"
+    help: "aws help"
+
+tactical_notes:
+  mission_critical:
+    - "Load the matching reference first: init-aws-configure.md for first-time setup and getting an Access Key ID, reset-aws-cli-access-key.md for resetting or rotating a key, setup-ec2-ipv6.md for IPv6 networking"
+    - "Run aws sts get-caller-identity to confirm the active identity before any change"
+    - "Never print, log or commit secret access keys; the secret is shown only once at creation"
+    - "The IPv6 reference never creates or modifies instances; it only prepares networking, looks up the instance ID, and verifies"
+    - "Echo each exported variable (VPC_ID, SUBNET_ID, INSTANCE_ID) before running a change, since a failed lookup returns None"
+```
