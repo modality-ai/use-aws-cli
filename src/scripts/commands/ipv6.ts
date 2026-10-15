@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { createInterface } from "node:readline/promises";
 import type { CLICommand } from "modality-cli-kit";
 import {
   buildResult,
@@ -7,6 +6,12 @@ import {
   findIpv6DefaultRoute,
   type CheckResult,
 } from "../../lib/ipv6-checks";
+import {
+  awsJson,
+  formatInstanceRow,
+  listInstances,
+  promptSelection,
+} from "../../lib/aws-ec2";
 
 /**
  * `use-aws-cli ipv6` — verify-only IPv6 readiness check for an existing EC2
@@ -37,81 +42,6 @@ const Ipv6ArgsSchema = z.object({
 });
 
 type Ipv6Args = z.infer<typeof Ipv6ArgsSchema>;
-
-/** Parsed `aws ... --output json` result; aws failures never throw. */
-type AwsResult = { ok: true; data: any } | { ok: false; error: string };
-
-/** One row of the instance picker. */
-type InstanceRow = {
-  id: string;
-  state: string;
-  subnetId: string;
-  name: string | null;
-};
-
-/**
- * Run `aws <args> --output json` via Bun.spawn (never a shell string) and
- * parse the result. A non-zero exit or bad JSON comes back as
- * `{ ok: false, error }` carrying the aws stderr text — never a throw.
- */
-async function awsJson(args: string[], region?: string): Promise<AwsResult> {
-  const argv = ["aws", ...args, "--output", "json"];
-  if (region) argv.push("--region", region);
-
-  try {
-    const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (exitCode !== 0) {
-      return { ok: false, error: stderr.trim() || `aws exited with code ${exitCode}` };
-    }
-    try {
-      return { ok: true, data: JSON.parse(stdout) };
-    } catch {
-      return { ok: false, error: "aws returned output that is not valid JSON" };
-    }
-  } catch (error) {
-    return { ok: false, error: `failed to run the aws CLI: ${String(error)}` };
-  }
-}
-
-/** Flatten describe-instances output into picker rows. */
-function toInstanceRows(data: any): InstanceRow[] {
-  const reservations: any[] = data?.Reservations ?? [];
-  return reservations
-    .flatMap((reservation) => reservation.Instances ?? [])
-    .map((instance) => ({
-      id: String(instance.InstanceId ?? ""),
-      state: String(instance.State?.Name ?? "unknown"),
-      subnetId: String(instance.SubnetId ?? "-"),
-      name: (instance.Tags ?? []).find((tag: any) => tag.Key === "Name")?.Value ?? null,
-    }))
-    .filter((row) => row.id !== "");
-}
-
-/** Numbered prompt; returns the chosen instance id, or null on cancel. */
-async function promptSelection(rows: InstanceRow[]): Promise<string | null> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    for (;;) {
-      const answer = (
-        await rl.question(`Select 1-${rows.length} (number or i-... id, empty to cancel): `)
-      ).trim();
-      if (!answer || answer.toLowerCase() === "q") return null;
-      if (/^i-[0-9a-fA-F]+$/.test(answer)) return answer;
-      const index = Number(answer);
-      if (Number.isInteger(index) && index >= 1 && index <= rows.length) {
-        return rows[index - 1]?.id ?? null;
-      }
-      console.log(`Invalid choice "${answer}" — enter 1-${rows.length}, an instance id, or empty to cancel.`);
-    }
-  } finally {
-    rl.close();
-  }
-}
 
 /**
  * Run the six read-only checks for one instance, everything derived from the
@@ -305,7 +235,7 @@ async function ipv6(args: Ipv6Args) {
 
   // No instance id → list candidates. A TTY asks which to verify; anything
   // else (piped, MCP tool call) returns the list and never blocks on input.
-  const listing = await awsJson(["ec2", "describe-instances"], region);
+  const listing = await listInstances(region);
   if (!listing.ok) {
     return {
       success: false,
@@ -314,7 +244,7 @@ async function ipv6(args: Ipv6Args) {
       message: `Cannot list instances: ${listing.error}`,
     };
   }
-  const rows = toInstanceRows(listing.data);
+  const rows = listing.rows;
   if (!rows.length) {
     return {
       success: false,
@@ -335,11 +265,7 @@ async function ipv6(args: Ipv6Args) {
   }
 
   console.log("Select an instance to verify:");
-  rows.forEach((row, index) => {
-    console.log(
-      `  ${index + 1}. ${row.id.padEnd(21)} ${row.state.padEnd(10)} subnet=${row.subnetId.padEnd(15)} ${row.name ?? "-"}`,
-    );
-  });
+  rows.forEach((row, index) => console.log(formatInstanceRow(row, index)));
 
   const selected = await promptSelection(rows);
   if (!selected) {
@@ -357,7 +283,7 @@ export const ipv6Command: CLICommand = {
   name: "ipv6",
   summary: "Verify IPv6 readiness of an EC2 instance (read-only)",
   description:
-    "Verify that an existing EC2 instance's VPC, subnet, route table, security group and network interface are IPv6-ready — read-only checks, each failure showing the exact aws fix command. With no instance id, lists instances for selection.",
+    "Check that an EC2 instance is IPv6-ready (read-only); failures show the aws fix command.",
   inputSchema: Ipv6ArgsSchema,
   positionalKeys: ["instanceId"],
   keyMap: { instanceId: { arg: "<instance-id>" } },
