@@ -134,7 +134,7 @@ Narrow `::/0` to your own range where possible.
 
 ## Step 5: Export the Instance ID
 
-This guide does not create instances. Use an instance you already have in the VPC. List the instances in the VPC:
+This guide does not create instances. Use an instance you already have in the VPC. Run `use-aws-cli ipv6 --verify` with no instance ID to list instances and pick one, or list the instances in the VPC manually:
 
 ```bash
 aws ec2 describe-instances --filters Name=vpc-id,Values=$VPC_ID \
@@ -155,9 +155,23 @@ aws ec2 describe-instances --instance-ids $INSTANCE_ID \
 
 ## Step 6: Verify
 
+Run the read-only checks (instance state, VPC and subnet IPv6 CIDR, `::/0` route, security group IPv6 rule, assigned IPv6 address). Each failure prints the exact `aws` fix command:
+
+```bash
+use-aws-cli ipv6 $INSTANCE_ID --verify
+```
+
+Or check the addresses manually, across all network interfaces:
+
 ```bash
 aws ec2 describe-instances --instance-ids $INSTANCE_ID \
-  --query 'Reservations[0].Instances[0].NetworkInterfaces[0].Ipv6Addresses[].Ipv6Address' --output text
+  --query 'Reservations[0].Instances[0].NetworkInterfaces[].Ipv6Addresses[].Ipv6Address' --output text
+```
+
+If the instance has no IPv6 address, assign one to its primary network interface:
+
+```bash
+aws ec2 assign-ipv6-addresses --network-interface-id <eni-id> --ipv6-address-count 1
 ```
 
 On the instance:

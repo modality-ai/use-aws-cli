@@ -2,7 +2,6 @@
 // Regenerate with generateCommandsIndex(); the commands directory is the
 // single source of truth.
 import type { CLICommand } from "modality-cli-kit";
-import { barCommand } from "./commands/bar";
-import { fooCommand } from "./commands/foo";
+import { ipv6Command } from "./commands/ipv6";
 
-export const commands: CLICommand[] = [barCommand, fooCommand];
+export const commands: CLICommand[] = [ipv6Command];
