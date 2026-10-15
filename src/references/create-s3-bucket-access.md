@@ -23,13 +23,7 @@ export BUCKET=<globally-unique-bucket-name>
 echo $BUCKET
 ```
 
-In `us-east-1`:
-
-```bash
-aws s3api create-bucket --bucket $BUCKET --region $AWS_REGION
-```
-
-In every other region, a location constraint is required:
+Create the bucket with a location constraint (use a region other than `us-east-1`; `us-east-1` rejects this flag):
 
 ```bash
 aws s3api create-bucket --bucket $BUCKET --region $AWS_REGION \
@@ -92,11 +86,6 @@ For read-only access, keep only `s3:ListBucket`, `s3:GetBucketLocation` and `s3:
 
 ## Step 4: Create the Key and Secret
 
-```bash
-aws iam create-access-key --user-name $S3_USER \
-  --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text
-```
-
 The first value is the **s3-key** (Access Key ID, starts with `AKIA`). The second is the **s3-secret** (Secret Access Key). AWS shows the secret only once, so save it now. To export both:
 
 ```bash
@@ -104,6 +93,7 @@ read S3_KEY S3_SECRET < <(aws iam create-access-key --user-name $S3_USER \
   --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text)
 export S3_KEY S3_SECRET
 echo $S3_KEY
+echo $S3_SECRET
 ```
 
 Do not `echo` the secret, commit it, or paste it into chat. A user can have at most 2 keys; see reset-aws-cli-access-key.md to rotate.
