@@ -40,7 +40,6 @@ integration_protocols:
 
 tactical_notes:
   mission_critical:
-    - "Load the matching reference first: init-aws-configure.md for first-time setup and getting an Access Key ID, reset-aws-cli-access-key.md for resetting or rotating a key, setup-ec2-ipv6.md for IPv6 networking"
     - "Run aws sts get-caller-identity to confirm the active identity before any change"
     - "Never print, log or commit secret access keys; the secret is shown only once at creation"
     - "The IPv6 reference never creates or modifies instances; it only prepares networking, looks up the instance ID, and verifies"
