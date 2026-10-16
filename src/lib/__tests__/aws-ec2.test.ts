@@ -22,3 +22,30 @@ describe("formatInstanceRow", () => {
     expect(line).toContain("1. i-1");
   });
 });
+
+import { toIpv6SubnetRows } from "../aws-ec2";
+
+describe("toIpv6SubnetRows", () => {
+  it("keeps only subnets with an associated IPv6 CIDR", () => {
+    const data = {
+      Subnets: [
+        {
+          SubnetId: "subnet-1",
+          VpcId: "vpc-1",
+          AvailabilityZone: "ap-northeast-1a",
+          CidrBlock: "10.0.0.0/24",
+          Ipv6CidrBlockAssociationSet: [{ Ipv6CidrBlock: "2600::/64", Ipv6CidrBlockState: { State: "associated" } }],
+          Tags: [{ Key: "Name", Value: "pub" }],
+        },
+        { SubnetId: "subnet-2", Ipv6CidrBlockAssociationSet: [] },
+        {
+          SubnetId: "subnet-3",
+          Ipv6CidrBlockAssociationSet: [{ Ipv6CidrBlock: "2601::/64", Ipv6CidrBlockState: { State: "disassociated" } }],
+        },
+      ],
+    };
+    const rows = toIpv6SubnetRows(data);
+    expect(rows.map((r) => r.id)).toEqual(["subnet-1"]);
+    expect(rows[0]!.name).toBe("pub");
+  });
+});

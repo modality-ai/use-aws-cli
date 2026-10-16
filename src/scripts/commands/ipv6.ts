@@ -9,7 +9,9 @@ import {
 import {
   awsJson,
   formatInstanceRow,
+  formatSubnetRow,
   listInstances,
+  listIpv6Subnets,
   promptSelection,
 } from "../../lib/aws-ec2";
 
@@ -35,6 +37,10 @@ const Ipv6ArgsSchema = z.object({
     .boolean()
     .optional()
     .describe("Run the read-only IPv6 verification checks (accepted for explicitness; verification is the command's only behavior)"),
+  list: z
+    .boolean()
+    .optional()
+    .describe("List all subnets that have an IPv6 CIDR block (read-only)"),
   region: z
     .string()
     .optional()
@@ -229,6 +235,18 @@ async function ipv6(args: Ipv6Args) {
   const instanceId = args.instanceId?.trim() || undefined;
   const region = args.region?.trim() || undefined;
 
+  if (args.list) {
+    const subnets = await listIpv6Subnets(region);
+    if (!subnets.ok) {
+      return { success: false, subnets: [], message: `Cannot list subnets: ${subnets.error}` };
+    }
+    const { rows } = subnets;
+    const message = rows.length
+      ? [`${rows.length} subnet(s) with IPv6:`, ...rows.map((row) => formatSubnetRow(row))].join("\n")
+      : "No subnets with an IPv6 CIDR block found in this region.";
+    return { success: true, count: rows.length, subnets: rows, message };
+  }
+
   if (instanceId) {
     return verifyInstance(instanceId, region);
   }
@@ -289,6 +307,7 @@ export const ipv6Command: CLICommand = {
   keyMap: { instanceId: { arg: "<instance-id>" } },
   execute: ipv6,
   examples: [
+    "use-aws-cli ipv6 --list",
     "use-aws-cli ipv6 --verify",
     "use-aws-cli ipv6 i-0123456789abcdef0 --verify",
     "use-aws-cli ipv6 --verify --region us-east-1",

@@ -63,6 +63,48 @@ export async function listInstances(
   return { ok: true, rows: toInstanceRows(listing.data) };
 }
 
+/** One subnet row for the IPv6 subnet list. */
+export type SubnetRow = {
+  id: string;
+  vpcId: string;
+  az: string;
+  ipv4Cidr: string;
+  ipv6Cidrs: string[];
+  name: string | null;
+};
+
+/** Keep only subnets with an associated IPv6 CIDR block. */
+export function toIpv6SubnetRows(data: any): SubnetRow[] {
+  const subnets: any[] = data?.Subnets ?? [];
+  return subnets
+    .map((subnet) => ({
+      id: String(subnet.SubnetId ?? ""),
+      vpcId: String(subnet.VpcId ?? "-"),
+      az: String(subnet.AvailabilityZone ?? "-"),
+      ipv4Cidr: String(subnet.CidrBlock ?? "-"),
+      ipv6Cidrs: ((subnet.Ipv6CidrBlockAssociationSet ?? []) as any[])
+        .filter((assoc) => assoc.Ipv6CidrBlockState?.State === "associated")
+        .map((assoc) => String(assoc.Ipv6CidrBlock ?? ""))
+        .filter((cidr) => cidr !== ""),
+      name: (subnet.Tags ?? []).find((tag: any) => tag.Key === "Name")?.Value ?? null,
+    }))
+    .filter((row) => row.id !== "" && row.ipv6Cidrs.length > 0);
+}
+
+/** List every subnet in the region that has an IPv6 CIDR, or the aws error. */
+export async function listIpv6Subnets(
+  region?: string,
+): Promise<{ ok: true; rows: SubnetRow[] } | { ok: false; error: string }> {
+  const listing = await awsJson(["ec2", "describe-subnets"], region);
+  if (!listing.ok) return { ok: false, error: listing.error };
+  return { ok: true, rows: toIpv6SubnetRows(listing.data) };
+}
+
+/** Format one subnet row as a printable line. */
+export function formatSubnetRow(row: SubnetRow): string {
+  return `  ${row.id.padEnd(26)} ${row.vpcId.padEnd(22)} ${row.az.padEnd(14)} ${row.ipv6Cidrs.join(",")} ${row.name ?? "-"}`;
+}
+
 /** Format one row as a printable line. */
 export function formatInstanceRow(row: InstanceRow, index?: number): string {
   const prefix = index === undefined ? "  " : `  ${index + 1}. `;
