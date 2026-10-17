@@ -14,6 +14,8 @@ import {
   listIpv6Subnets,
   promptSelection,
 } from "../../lib/aws-ec2";
+import { awsFixes, awsQueries } from "../../config/aws-commands";
+import { renderCmdText } from "../../lib/aws-command-template";
 
 /**
  * `use-aws-cli ipv6` — verify-only IPv6 readiness check for an existing EC2
@@ -58,7 +60,7 @@ async function verifyInstance(instanceId: string, region?: string) {
   const checks: CheckResult[] = [];
 
   // C1 — the instance must exist and be running.
-  const lookup = await awsJson(["ec2", "describe-instances", "--instance-ids", instanceId], region);
+  const lookup = await awsJson(renderCmdText(awsQueries.describeInstance, { instanceId }), region);
   if (!lookup.ok) {
     checks.push({ id: "instance-state", name: "Instance exists and is running", ok: false, detail: lookup.error });
     return buildResult(instanceId, checks);
@@ -80,7 +82,7 @@ async function verifyInstance(instanceId: string, region?: string) {
     name: "Instance exists and is running",
     ok: state === "running",
     detail: `State is '${state}'`,
-    fix: state === "running" ? undefined : `aws ec2 start-instances --instance-ids ${instanceId}`,
+    fix: state === "running" ? undefined : renderCmdText(awsFixes.startInstance, { instanceId }),
   });
 
   const vpcId: string | undefined = instance.VpcId;
@@ -97,7 +99,7 @@ async function verifyInstance(instanceId: string, region?: string) {
   const enis: any[] = instance.NetworkInterfaces ?? [];
 
   // C2 — the VPC needs an associated IPv6 CIDR block (the /56).
-  const vpc = await awsJson(["ec2", "describe-vpcs", "--vpc-ids", vpcId], region);
+  const vpc = await awsJson(renderCmdText(awsQueries.describeVpc, { vpcId }), region);
   const vpcIpv6 = vpc.ok
     ? (vpc.data?.Vpcs?.[0]?.Ipv6CidrBlockAssociationSet ?? [])
         .find((association: any) => association.Ipv6CidrBlockState?.State === "associated")
@@ -112,11 +114,11 @@ async function verifyInstance(instanceId: string, region?: string) {
     name: "VPC has an IPv6 CIDR block",
     ok: Boolean(vpcIpv6),
     detail: vpcDetail,
-    fix: vpcIpv6 ? undefined : `aws ec2 associate-vpc-cidr-block --vpc-id ${vpcId} --amazon-provided-ipv6-cidr-block`,
+    fix: vpcIpv6 ? undefined : renderCmdText(awsFixes.associateVpcIpv6, { vpcId }),
   });
 
   // C3 — the subnet needs its own /64, derived from the VPC's /56.
-  const subnet = await awsJson(["ec2", "describe-subnets", "--subnet-ids", subnetId], region);
+  const subnet = await awsJson(renderCmdText(awsQueries.describeSubnet, { subnetId }), region);
   const subnetIpv6 = subnet.ok
     ? (subnet.data?.Subnets?.[0]?.Ipv6CidrBlockAssociationSet ?? [])
         .find((association: any) => association.Ipv6CidrBlockState?.State === "associated")
@@ -130,7 +132,7 @@ async function verifyInstance(instanceId: string, region?: string) {
   if (!subnetIpv6 && vpcIpv6) {
     const derived = vpcIpv6.replace(/\/56$/, "/64");
     if (derived !== vpcIpv6) {
-      subnetFix = `aws ec2 associate-subnet-cidr-block --subnet-id ${subnetId} --ipv6-cidr-block ${derived}`;
+      subnetFix = renderCmdText(awsFixes.associateSubnetIpv6, { subnetId, ipv6Cidr: derived });
     }
   }
   checks.push({
@@ -143,7 +145,7 @@ async function verifyInstance(instanceId: string, region?: string) {
 
   // C4 — the subnet's route table needs an ::/0 route to an internet gateway
   // (the explicit association wins over the VPC main table).
-  const rtbs = await awsJson(["ec2", "describe-route-tables", "--filters", `Name=vpc-id,Values=${vpcId}`], region);
+  const rtbs = await awsJson(renderCmdText(awsQueries.describeRouteTables, { vpcId }), region);
   const routeTables: any[] = rtbs.ok ? (rtbs.data?.RouteTables ?? []) : [];
   const explicitTable = routeTables.find((table) =>
     (table.Associations ?? []).some((association: any) => association.SubnetId === subnetId),
@@ -163,7 +165,10 @@ async function verifyInstance(instanceId: string, region?: string) {
     const ipv4Gateway =
       (routeTable.Routes ?? []).find((route: any) => route.DestinationCidrBlock === "0.0.0.0/0")?.GatewayId ??
       "<igw-id>";
-    routeFix = `aws ec2 create-route --route-table-id ${routeTable.RouteTableId} --destination-ipv6-cidr-block ::/0 --gateway-id ${ipv4Gateway}`;
+    routeFix = renderCmdText(awsFixes.createIpv6Route, {
+      routeTableId: String(routeTable.RouteTableId),
+      gatewayId: String(ipv4Gateway),
+    });
   }
   checks.push({
     id: "ipv6-default-route",
@@ -184,7 +189,7 @@ async function verifyInstance(instanceId: string, region?: string) {
   if (sgIds.length === 0) {
     sgDetail = "Instance has no security groups";
   } else {
-    const sgs = await awsJson(["ec2", "describe-security-groups", "--group-ids", ...sgIds], region);
+    const sgs = await awsJson(renderCmdText(awsQueries.describeSecurityGroups, { groupIds: sgIds }), region);
     if (!sgs.ok) sgDetail = sgs.error;
     else {
       const group = (sgs.data?.SecurityGroups ?? []).find((sg: any) =>
@@ -195,7 +200,7 @@ async function verifyInstance(instanceId: string, region?: string) {
         sgDetail = `Group ${group.GroupId} has an IPv6 ingress rule`;
       } else {
         sgDetail = `No IPv6 ingress rule in ${sgIds.length} security group(s) — IPv4 rules do not cover IPv6`;
-        sgFix = `aws ec2 authorize-security-group-ingress --group-id ${sgIds[0]} --ip-permissions 'IpProtocol=tcp,FromPort=22,ToPort=22,Ipv6Ranges=[{CidrIpv6=::/0}]'`;
+        sgFix = renderCmdText(awsFixes.allowIpv6Ssh, { groupId: String(sgIds[0]) });
       }
     }
   }
@@ -218,7 +223,7 @@ async function verifyInstance(instanceId: string, region?: string) {
   } else {
     eniDetail = "No IPv6 address assigned to the primary network interface";
     const primaryEniId = String(primaryEni?.NetworkInterfaceId ?? "");
-    eniFix = `aws ec2 assign-ipv6-addresses --network-interface-id ${primaryEniId || "<eni-id>"} --ipv6-address-count 1`;
+    eniFix = renderCmdText(awsFixes.assignIpv6Address, { eniId: primaryEniId || "<eni-id>" });
   }
   checks.push({
     id: "eni-ipv6-address",

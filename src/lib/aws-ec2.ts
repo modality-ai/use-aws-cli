@@ -1,4 +1,6 @@
 import { createInterface } from "node:readline/promises";
+import { awsQueries } from "../config/aws-commands";
+import { renderCmdText } from "./aws-command-template";
 
 /** Parsed `aws ... --output json` result; aws failures never throw. */
 export type AwsResult = { ok: true; data: any } | { ok: false; error: string };
@@ -12,12 +14,12 @@ export type InstanceRow = {
 };
 
 /**
- * Run `aws <args> --output json` via Bun.spawn (never a shell string) and
+ * Run the rendered `aws ...` command text with `--output json` via Bun.spawn (never a shell string) and
  * parse the result. A non-zero exit or bad JSON comes back as
  * `{ ok: false, error }` carrying the aws stderr text — never a throw.
  */
-export async function awsJson(args: string[], region?: string): Promise<AwsResult> {
-  const argv = ["aws", ...args, "--output", "json"];
+export async function awsJson(command: string, region?: string): Promise<AwsResult> {
+  const argv = [...command.trim().split(/\s+/), "--output", "json"];
   if (region) argv.push("--region", region);
 
   try {
@@ -58,7 +60,7 @@ export function toInstanceRows(data: any): InstanceRow[] {
 export async function listInstances(
   region?: string,
 ): Promise<{ ok: true; rows: InstanceRow[] } | { ok: false; error: string }> {
-  const listing = await awsJson(["ec2", "describe-instances"], region);
+  const listing = await awsJson(renderCmdText(awsQueries.describeInstances), region);
   if (!listing.ok) return { ok: false, error: listing.error };
   return { ok: true, rows: toInstanceRows(listing.data) };
 }
@@ -95,7 +97,7 @@ export function toIpv6SubnetRows(data: any): SubnetRow[] {
 export async function listIpv6Subnets(
   region?: string,
 ): Promise<{ ok: true; rows: SubnetRow[] } | { ok: false; error: string }> {
-  const listing = await awsJson(["ec2", "describe-subnets"], region);
+  const listing = await awsJson(renderCmdText(awsQueries.describeSubnets), region);
   if (!listing.ok) return { ok: false, error: listing.error };
   return { ok: true, rows: toIpv6SubnetRows(listing.data) };
 }
